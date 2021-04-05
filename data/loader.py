@@ -19,7 +19,7 @@ class TrafficFlowData:
         self.test = None
         self.w_adj_mat = self.get_weighted_adjacency_matrix()
         self.n_node = self.w_adj_mat.shape[1]
-        self.gen_data()
+        self.train_x, self.train_y, self.test_x, self.test_y = self.gen_data()
 
     def get_weighted_adjacency_matrix(self, sigma2=0.1, epsilon=0.5, scaling=True):
         df = pd.read_csv(self.w_path, header=None).to_numpy()
@@ -69,6 +69,7 @@ class TrafficFlowData:
         self.train = TensorDataset(train_data_x, train_data_y)
         self.val = TensorDataset(val_data_x, val_data_y)
         self.test = TensorDataset(test_data_x, test_data_y)
+        return train_data_x, train_data_y, test_data_x, test_data_y
 
     def get_conv_kernel(self, approx: str):
         if approx == "linear":
