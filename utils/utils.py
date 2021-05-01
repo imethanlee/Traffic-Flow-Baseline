@@ -5,12 +5,14 @@ import numpy as np
 class Utils:
     mean = 0
     std = 0
+    null_val = None
 
     @staticmethod
     def fit(x: np.ndarray):
         len_x = len(x)
         Utils.mean = np.sum(x) / len_x
         Utils.std = np.std(x)
+        Utils.null_val = (0. - Utils.mean) / Utils.std
 
     @staticmethod
     def z_score(x: np.ndarray):

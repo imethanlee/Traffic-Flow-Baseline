@@ -1,6 +1,7 @@
 from model.fnn import *
 from data.loader import *
 from utils.early_stop import *
+from utils.masked_loss import *
 from torch.utils.data import DataLoader
 from torchsummary import summary
 import torch
@@ -54,8 +55,11 @@ def val():
     loss_sum, n = 0., 0
     with torch.no_grad():
         for x, y in val_iter:
+            if torch.sum(torch.ne(y, Utils.null_val)).item() == 0.:
+                continue
+
             y_pred = model(x).view(len(x), -1)
-            loss = criterion(y_pred, y)
+            loss = masked_mse_loss(y_pred, y, Utils.null_val)
             loss_sum += loss.item() * y.shape[0]
             n += y.shape[0]
         return loss_sum / n
@@ -67,11 +71,19 @@ def train():
         model.train()
         loss_sum, n = 0., 0
         for x, y in tqdm.tqdm(train_iter):
+            # TODO: 真实值全是null value导致masked_loss为0，可能导致了梯度出现问题
+            #       因此此处直接既不inference，也不back-propagate
+            if torch.sum(torch.ne(y, Utils.null_val)).item() == 0.:
+                continue
+
             y_pred = model(x).view(len(x), -1)
-            loss = criterion(y_pred, y)
+
+            loss = masked_mse_loss(y_pred, y, Utils.null_val)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
             loss_sum += loss.item() * y.shape[0]
             n += y.shape[0]
         scheduler.step()
@@ -83,8 +95,8 @@ def train():
         if early_stop.save:
             torch.save(model.state_dict(), model_save_path)
 
-        print('Epoch: {:03d} | Lr: {:.20f} | Train loss: {:.6f} | Val loss: {:.6f} | Early Stop: {:02d}'.format(
-            epoch, optimizer.param_groups[0]['lr'], loss_sum / n, val_loss, early_stop.cnt))
+        # print('Epoch: {:03d} | Lr: {:.20f} | Train loss: {:.6f} | Val loss: {:.6f} | Early Stop: {:02d}'.format(
+        #     epoch, optimizer.param_groups[0]['lr'], loss_sum / n, val_loss, early_stop.cnt))
 
     print("Training Completed!")
 
@@ -95,24 +107,34 @@ def test():
     loss_sum, n = 0., 0
     with torch.no_grad():
         for x, y in test_iter:
-            y_pred = model(x).view(len(x), -1)
-            l = criterion(y_pred, y)
-            loss_sum += l.item() * y.shape[0]
-            n += y.shape[0]
-        loss = loss_sum / n
+            if torch.sum(torch.ne(y, Utils.null_val)).item() == 0.:
+                continue
 
-        ae, ape, se = [], [], []
+            y_pred = model(x).view(len(x), -1)
+            loss = masked_mse_loss(y_pred, y, Utils.null_val)
+            loss_sum += loss.item() * y.shape[0]
+            n += y.shape[0]
+        test_loss = loss_sum / n
+
+        ae, ape, se, n = 0., 0., 0., 0
         for x, y in test_iter:
-            y = Utils.inverse_z_score(y.cpu().numpy()).reshape(-1)
-            y_pred = Utils.inverse_z_score(model(x).view(len(x), -1).cpu().numpy()).reshape(-1)
-            d = np.abs(y - y_pred)
-            ae += d.tolist()
-            ape += (np.divide(d, y)).tolist()
-            se += (np.power(d, 2)).tolist()
-        mae = np.array(ae).mean()
-        mape = np.array(ape).mean()
-        rmse = np.sqrt(np.array(se).mean())
-    print('Test loss {:.6f}'.format(loss))
+            if torch.sum(torch.ne(y, Utils.null_val)).item() == 0.:
+                continue
+
+            batch_size = len(x)
+            n += batch_size
+
+            y_true = Utils.inverse_z_score(y.view(batch_size, -1).cpu().numpy())
+            y_pred = Utils.inverse_z_score(model(x).view(batch_size, -1).cpu().numpy())
+
+            ae += batch_size * masked_loss_np(y_pred, y_true, "mae")
+            ape += batch_size * masked_loss_np(y_pred, y_true, "mape")
+            se += batch_size * masked_loss_np(y_pred, y_true, "rmse")
+
+        mae = np.divide(ae, n)
+        mape = np.divide(ape, n)
+        rmse = np.sqrt(np.divide(se, n))
+    print('Test loss {:.6f}'.format(test_loss))
     print('MAE {:.6f} | MAPE {:.8f} | RMSE {:.6f}'.format(mae, mape, rmse))
 
 
